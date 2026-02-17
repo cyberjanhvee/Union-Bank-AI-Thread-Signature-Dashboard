@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Union Bank – AI Thread‑Signature Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      font-family: Arial, sans-serif;
+      background: #f4f6f9;
+      margin: 0;
+      padding: 20px;
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    h1 {
+      text-align: center;
+      color: #1a3e72;
+    }
+    .card {
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      padding: 16px;
+      margin-bottom: 20px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 8px;
+    }
+    th, td {
+      padding: 8px 12px;
+      text-align: left;
+      border-bottom: 1px solid #eee;
+    }
+    th {
+      background: #1a3e72;
+      color: white;
+    }
+    .status {
+      font-weight: bold;
+      text-transform: uppercase;
+    }
+    .low_risk { color: #4CAF50; }
+    .medium_risk { color: #FFC107; }
+    .high_risk { color: #F44336; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Union Bank – AI Thread‑Signature Dashboard</h1>
+
+    <div class="card">
+      <h2>Live High‑Risk Threads</h2>
+      <table id="threads-table">
+        <thead>
+          <tr>
+            <th>Thread ID</th>
+            <th>Customer</th>
+            <th>Device</th>
+            <th>Count</th>
+            <th>Amount Sum</th>
+            <th>Risk Score</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>Recent Transactions (last 30s)</h2>
+      <table id="tx-table">
+        <thead>
+          <tr>
+            <th>TX ID</th>
+            <th>Customer</th>
+            <th>Amount</th>
+            <th>Beneficiary</th>
+            <th>Channel</th>
+            <th>Timestamp</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>Risk Distribution</h2>
+      <canvas id="risk-chart" height="100"></canvas>
+    </div>
+  </div>
+
+  <script>
+    // In‑memory storage (demo only)
+    const transactions = [];
+    const threads = {}; // key: `${customer}_${device}`
+
+    // Simulate real‑time transactions
+    function simulateTransaction() {
+      const customers = ["C1001", "C1002", "C1003"];
+      const beneficiaries = ["B2001", "B2002", "B2003", "B2004"];
+      const devices = ["D9001", "D9002"];
+
+      const tx = {
+        tx_id: "TX" + Math.floor(Math.random() * 900000 + 100000),
+        customer: customers[Math.floor(Math.random() * customers.length)],
+        device: devices[Math.floor(Math.random() * devices.length)],
+        amount: Math.floor(Math.random() * 1990 + 10),
+        beneficiary: beneficiaries[Math.floor(Math.random() * beneficiaries.length)],
+        channel: "UPI",
+        timestamp: new Date().toISOString(),
+      };
+
+      transactions.push(tx);
+
+      // Group into threads (by customer + device + last 30s)
+      const now = new Date();
+      const cutoff = new Date(now.getTime() - 30 * 1000);
+      const key = `${tx.customer}_${tx.device}`;
+
+      if (!threads[key]) {
+        threads[key] = {
+          key,
+          events: [],
+          start: now,
+          risk_score: 0.0,
+          status: "active",
+        };
+      }
+
+      threads[key].events.push(tx);
+      threads[key].events = threads[key].events.filter(
+        e => new Date(e.timestamp) >= cutoff
+      );
+
+      // Compute thread risk score
+      const events = threads[key].events;
+      let amount_sum = 0;
+      let count = events.length;
+      const beneficiary_set = new Set();
+
+      events.forEach(e => {
+        amount_sum += e.amount;
+        beneficiary_set.add(e.beneficiary);
+      });
+
+      let score = 0.0;
+      if (count >= 5) score += 0.3;
+      if (beneficiary_set.size >= 3) score += 0.3;
+      if (amount_sum > 5000) score += 0.4;
+      score = Math.min(score, 1.0);
+
+      threads[key].risk_score = score;
+
+      if (score >= 0.7) threads[key].status = "high_risk";
+      else if (score >= 0.4) threads[key].status = "medium_risk";
+      else threads[key].status = "low_risk";
+    }
+
+    // Render threads table
+    function renderThreads() {
+      const tbody = document.querySelector("#threads-table tbody");
+      tbody.innerHTML = "";
+
+      const now = new Date();
+      const cutoff = new Date(now.getTime() - 30 * 1000);
+
+      const counts = { low: 0, medium: 0, high: 0 };
+
+      Object.values(threads).forEach(t => {
+        const recent = t.events.filter(e => new Date(e.timestamp) >= cutoff);
+        if (recent.length === 0) return;
+
+        const row = document.createElement("tr");
+        const amount_sum = recent.reduce((sum, e) => sum + e.amount, 0);
+
+        row.innerHTML = `
+          <td>${t.key}</td>
+          <td>${t.key.split("_")[0]}</td>
+          <td>${t.key.split("_")[1]}</td>
+          <td>${recent.length}</td>
+          <td>₹${amount_sum}</td>
+          <td>${t.risk_score.toFixed(3)}</td>
+          <td class="status ${t.status}">${t.status.replace("_", " ")}</td>
+        `;
+        tbody.appendChild(row);
+
+        if (t.status === "low_risk") counts.low++;
+        else if (t.status === "medium_risk") counts.medium++;
+        else counts.high++;
+      });
+
+      updateRiskChart(counts);
+    }
+
+    // Render transactions table
+    function renderTransactions() {
+      const tbody = document.querySelector("#tx-table tbody");
+      tbody.innerHTML = "";
+
+      const now = new Date();
+      const cutoff = new Date(now.getTime() - 30 * 1000);
+      const recent = transactions.filter(tx => new Date(tx.timestamp) >= cutoff);
+
+      recent.slice(-20).forEach(tx => {
+        const row = document.createElement("tr");
+        row.innerHTML = `
+          <td>${tx.tx_id}</td>
+          <td>${tx.customer}</td>
+          <td>₹${tx.amount}</td>
+          <td>${tx.beneficiary}</td>
+          <td>${tx.channel}</td>
+          <td>${new Date(tx.timestamp).toLocaleTimeString()}</td>
+        `;
+        tbody.appendChild(row);
+      });
+    }
+
+    // Risk distribution chart
+    let riskChart = null;
+    function updateRiskChart(counts) {
+      const ctx = document.getElementById("risk-chart").getContext("2d");
+      if (!riskChart) {
+        riskChart = new Chart(ctx, {
+          type: "bar",
+          data: {
+            labels: ["Low Risk", "Medium Risk", "High Risk"],
+            datasets: [{
+              label: "Thread Count",
+              data: [counts.low, counts.medium, counts.high],
+              backgroundColor: ["#4CAF50", "#FFC107", "#F44336"]
+            }]
+          },
+          options: { responsive: true, maintainAspectRatio: false }
+        });
+      } else {
+        riskChart.data.datasets[0].data = [counts.low, counts.medium, counts.high];
+        riskChart.update();
+      }
+    }
+
+    // Start simulation
+    function startSimulation() {
+      simulateTransaction();
+      renderThreads();
+      renderTransactions();
+
+      setInterval(() => {
+        simulateTransaction();
+        renderThreads();
+        renderTransactions();
+      }, 500);
+    }
+
+    // Initial load
+    window.addEventListener("load", startSimulation);
+  </script>
+</body>
+</html>
